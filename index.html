@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#ffffff">
+<title>钟轨 · Clock Track</title>
+<style>
+:root{
+  --bg:#ffffff;--bg2:#f4f4f4;
+  --ink:#0d0d0d;--g1:#3d3d3d;--g2:#7a7a7a;--g3:#c2c2c2;
+  --ln:#e6e6e6;--ln2:#f0f0f0;
+  --serif:"Noto Serif SC","Source Han Serif SC","思源宋体","Songti SC","STSong",serif;
+  --ui:-apple-system,"SF Pro Rounded","Helvetica Neue","PingFang SC","Noto Sans SC",sans-serif;
+  --mono:"SF Mono","JetBrains Mono","Roboto Mono",ui-monospace,monospace;
+  --e:cubic-bezier(.22,1,.36,1);
+  --pad:clamp(26px,7.4vw,52px);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink)}
+body{
+  font-family:var(--ui);font-weight:300;font-size:12px;line-height:1.72;letter-spacing:.01em;
+  -webkit-font-smoothing:antialiased;overscroll-behavior:none;
+  touch-action:pan-y;position:relative;max-width:100vw;
+}
+::selection{background:var(--ink);color:#fff}
+
+/* ---------- 顶部细进度条 ---------- */
+#bar{position:fixed;left:0;top:0;height:2px;background:var(--ink);z-index:60;width:0;transition:width .7s var(--e)}
+/* ---------- 右侧竖导航 ---------- */
+#rail{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:62;
+  display:flex;align-items:flex-end;gap:4px;background:rgba(255,255,255,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid var(--ln);padding:7px 8px;box-shadow:0 6px 24px rgba(0,0,0,.05)}
+#rail button{background:none;border:0;cursor:pointer;padding:3px 8px;display:flex;flex-direction:column;align-items:center;gap:4px;
+  font-family:var(--mono);font-size:8.5px;letter-spacing:.08em;color:var(--g3);transition:color .4s var(--e)}
+#rail button i{display:block;width:10px;height:1px;background:currentColor;transition:width .45s var(--e),background .3s}
+#rail button span{transition:transform .35s var(--e)}
+#rail button.on span{transform:translateY(-1px)}
+#rail button.on{color:var(--ink)}
+#rail button.on i{width:20px;background:var(--ink)}
+/* ---------- 顶部左上角信息 ---------- */
+#hud{position:fixed;left:calc(env(safe-area-inset-left,0px) + var(--pad));top:calc(env(safe-area-inset-top,0px) + 16px);z-index:55;
+  font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--g3);display:flex;gap:10px;align-items:center;pointer-events:none}
+#hud b{font-weight:400;color:var(--g1)}
+#hud span{width:18px;height:1px;background:var(--g3)}
+/* ---------- 底部 ---------- */
+#foot{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 62px);z-index:55;
+  display:flex;justify-content:space-between;align-items:center;padding:0 var(--pad);font-family:var(--mono);font-size:9px;color:var(--g3);letter-spacing:.14em;pointer-events:none}
+
+/* ---------- 页面容器：竖向堆叠，整屏横向推进 ---------- */
+#deck{position:absolute;inset:0;display:flex;width:100%;height:100%;will-change:transform;
+  transition:transform .95s cubic-bezier(.19,.9,.24,1)}
+/* 松手回弹：轻微过冲后归位，模拟重力吸附 */
+#deck.snap{transition:transform .55s cubic-bezier(.2,1.32,.36,1)}
+.pg{flex:0 0 100%;width:100%;height:100%;position:relative;overflow:hidden;
+  display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top,0px) + 52px) var(--pad) calc(env(safe-area-inset-bottom,0px) + 84px)}
+.pg.scroll{overflow-y:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.pg.scroll::-webkit-scrollbar{display:none}
+.wrap{width:100%;max-width:520px;margin:auto}
+.pg[data-e="INITIAL"] .wrap{margin-top:0;padding-top:0}
+.pg[data-e="INITIAL"]{justify-content:flex-start;padding-top:calc(env(safe-area-inset-top,0px) + 40px)}
+.pg[data-e="TOWER"]{justify-content:flex-start}
+.pg[data-e="TOWER"] .wrap{margin-top:0;padding-top:0}
+
+/* ---------- 翻页重力：新页轻微下沉再就位 ---------- */
+.pg .wrap{transition:transform 1s cubic-bezier(.19,.9,.24,1),opacity .85s var(--e)}
+.pg:not(.on) .wrap{transform:translateY(14px) scale(.985);opacity:.55}
+.pg.on .wrap{transform:none;opacity:1}
+
+/* ---------- 开场：整体由模糊到清晰 ---------- */
+body::before{content:"";position:fixed;inset:0;z-index:120;pointer-events:none;background:#fff;
+  opacity:1;animation:openFade 1.9s cubic-bezier(.4,0,.2,1) forwards}
+@keyframes openFade{0%{opacity:1}55%{opacity:.9}100%{opacity:0;visibility:hidden}}
+/* 开场模糊：作用于每页内容层而非 #deck（deck 的 transform 由翻页控制，不能被动画锁定） */
+#deck .pg .wrap{animation:openDeck 2.2s cubic-bezier(.19,.9,.24,1) both}
+@keyframes openDeck{
+  0%{filter:blur(16px);opacity:.35;transform:scale(1.03)}
+  55%{filter:blur(3px);opacity:.95}
+  100%{filter:blur(0);opacity:1;transform:none}
+}
+#hud,#foot{animation:openFadeIn 2.1s var(--e) .35s both}
+@keyframes openFadeIn{0%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:none}}
+
+/* ---------- 入场 ---------- */
+.up{opacity:0;transform:translateY(18px);filter:blur(6px);transition:opacity .95s var(--e),transform 1.05s cubic-bezier(.19,.9,.24,1),filter 1s var(--e)}
+.pg.on .up{opacity:1;transform:none;filter:blur(0)}
+.pg.on .up:nth-child(1){transition-delay:.05s}
+.pg.on .up:nth-child(2){transition-delay:.13s}
+.pg.on .up:nth-child(3){transition-delay:.21s}
+.pg.on .up:nth-child(4){transition-delay:.29s}
+.pg.on .up:nth-child(5){transition-delay:.37s}
+.pg.on .up:nth-child(6){transition-delay:.45s}
+
+/* ---------- 通用字 ---------- */
+.eyebrow{font-family:var(--mono);font-size:8.5px;letter-spacing:.32em;color:var(--g3);text-transform:uppercase}
+.h1{font-family:var(--serif);font-weight:300;letter-spacing:.14em;line-height:1.5}
+.rule{height:1px;background:var(--ln);width:100%}
+.dim{color:var(--g2)}
+.mono{font-family:var(--mono);letter-spacing:.1em}
+
+/* ========== 01 邀约 · 主题美化（交互不变） ========== */
+.invite{text-align:center;position:relative;padding-top:22px}
+
+/* 背景轨道组：三重同心，向外渐隐，视觉柔和 */
+.invite .orbit{position:absolute;left:calc(50% - min(42vw,180px));top:calc(50% - 26px - min(42vw,180px));
+  width:min(84vw,360px);aspect-ratio:1;pointer-events:none;opacity:0;transition:opacity 3s var(--e) .5s}
+.invite .orbit::before{content:"";position:absolute;inset:0;border:1px solid var(--ln);border-radius:50%;
+  -webkit-mask-image:radial-gradient(circle,transparent 0,transparent 62%,#000 88%);
+  mask-image:radial-gradient(circle,transparent 0,transparent 62%,#000 88%)}
+.invite .orbit::after{content:"";position:absolute;inset:44px;border:1px solid var(--ln2);border-radius:50%;
+  -webkit-mask-image:conic-gradient(from 0deg,#000 0%,#000 120deg,transparent 210deg,transparent 330deg,#000 360deg);
+  mask-image:conic-gradient(from 0deg,#000 0%,#000 120deg,transparent 210deg,transparent 330deg,#000 360deg);
+  animation:orbitFade 14s linear infinite}
+@keyframes orbitFade{to{transform:rotate(360deg)}}
+/* 主环：细虚线、慢转、两端渐隐 */
+.invite .ring{position:absolute;left:calc(50% - min(33vw,142px));top:calc(50% - 26px - min(33vw,142px));
+  width:min(66vw,284px);aspect-ratio:1;border:1px dashed var(--ln2);border-radius:50%;pointer-events:none;
+  animation:ringSpin 90s linear infinite;
+  -webkit-mask-image:conic-gradient(from 0deg,transparent 0,#000 70deg,#000 290deg,transparent 360deg);
+  mask-image:conic-gradient(from 0deg,transparent 0,#000 70deg,#000 290deg,transparent 360deg)}
+@keyframes ringSpin{to{transform:rotate(360deg)}}
+/* 轨道光点：带柔光尾迹 */
+.invite .dot{position:absolute;left:calc(50% - min(42vw,180px));top:calc(50% - 26px - min(42vw,180px));
+  width:min(84vw,360px);aspect-ratio:1;pointer-events:none;animation:dotOrbit 30s linear infinite;opacity:0;transition:opacity 3s var(--e) 1s}
+.invite .dot::before{content:"";position:absolute;left:50%;top:-2px;width:4px;height:4px;margin-left:-2px;
+  border-radius:50%;background:var(--ink);box-shadow:0 0 8px 2px rgba(13,13,13,.1)}
+@keyframes dotOrbit{to{transform:rotate(360deg)}}
+/* 环心涟漪：从圆心缓缓扩散的细环，循环往复 */
+.invite .rip{position:absolute;left:calc(50% - min(42vw,180px));top:calc(50% - 26px - min(42vw,180px));
+  width:min(84vw,360px);aspect-ratio:1;pointer-events:none}
+.invite .rip i{position:absolute;inset:0;border:1px solid rgba(13,13,13,.16);border-radius:50%;
+  opacity:0;animation:invRip 5.5s cubic-bezier(.2,.6,.3,1) infinite}
+.invite .rip i:nth-child(2){animation-delay:1.8s}
+.invite .rip i:nth-child(3){animation-delay:3.6s}
+@keyframes invRip{0%{transform:scale(.1);opacity:0}18%{opacity:.5}100%{transform:scale(1);opacity:0}}
+/* 光晕：再柔一层 */
+.invite::before{content:"";position:absolute;left:50%;top:calc(50% - 20px);width:min(96vw,400px);aspect-ratio:1;
+  transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle,rgba(13,13,13,.035),rgba(13,13,13,0) 58%)}
+
+/* 顶部系统标识 */
+.invite .top-sys{position:relative;display:inline-flex;align-items:center;gap:9px;letter-spacing:.44em;
+  font-size:8.5px;color:var(--g3);margin-bottom:0;padding-left:.44em}
+.invite .top-sys::before,.invite .top-sys::after{content:"";width:16px;height:1px;background:var(--ln)}
+.invite .mid{margin-top:26px}
+.invite .t1{font-family:var(--serif);font-weight:300;font-size:clamp(16px,4.4vw,19px);letter-spacing:.2em;
+  color:var(--ink);line-height:1.65;text-shadow:0 1px 0 rgba(255,255,255,.9)}
+.invite .t2{margin-top:12px;font-size:9px;letter-spacing:.26em;color:var(--g3)}
+.invite .t2 em{font-style:normal;color:var(--g2)}
+
+/* 确认卡：双层细边 + 内嵌角标 + 柔光投影 */
+.consent{margin:38px auto 0;width:min(304px,100%);position:relative;z-index:2;
+  border:1px solid var(--ink);background:rgba(255,255,255,.94);
+  padding:18px 18px 16px;box-shadow:0 18px 44px -20px rgba(0,0,0,.18),0 0 0 1px rgba(255,255,255,.9) inset;
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.consent::before{content:"";position:absolute;inset:4px;border:1px solid var(--ln2);pointer-events:none}
+/* 四角小刻 */
+.consent .cnr{position:absolute;width:7px;height:7px;border:1px solid var(--ink);pointer-events:none}
+.consent .cnr.tl{left:-1px;top:-1px;border-right:0;border-bottom:0}
+.consent .cnr.tr{right:-1px;top:-1px;border-left:0;border-bottom:0}
+.consent .cnr.bl{left:-1px;bottom:-1px;border-right:0;border-top:0}
+.consent .cnr.br{right:-1px;bottom:-1px;border-left:0;border-top:0}
+.consent .qt{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);
+  font-size:6.5px;letter-spacing:.26em;color:var(--g3);margin-bottom:10px}
+.consent .q{display:flex;align-items:center;font-size:10.5px;letter-spacing:.16em;color:var(--ink)}
+.consent .q .dotline{flex:1;height:1px;background:var(--ln);margin:0 10px}
+.consent .q #qMark{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--g2);min-width:22px;text-align:right}
+.consent .pick{margin-top:14px;display:flex;gap:8px;width:auto;margin-left:0;margin-right:0}
+.consent .pb{flex:1;height:36px;border:1px solid var(--ln);border-radius:0;background:#fff;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;color:var(--g2);cursor:pointer;
+  transition:background .5s var(--e),color .5s var(--e),border-color .5s var(--e)}
+.consent .pb.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.consent .go{margin:10px 0 0;width:100%;height:42px;border:1px solid var(--ink);border-radius:0;background:#fff;color:var(--ink);
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.34em;cursor:pointer;
+  transition:background .55s var(--e),color .55s var(--e),letter-spacing .5s var(--e);display:block;position:relative;overflow:hidden}
+.consent .go:disabled{opacity:.28;cursor:not-allowed;background:#fff;color:var(--ink)}
+.consent .go:not(:disabled){background:var(--ink);color:#fff}
+.consent .go:not(:disabled):active{letter-spacing:.44em}
+/* 确认键可点时的微光扫过 */
+.consent .go:not(:disabled)::after{content:"";position:absolute;top:0;bottom:0;width:36%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent);
+  animation:goSheen 3.6s ease-in-out infinite}
+@keyframes goSheen{0%{left:-40%}55%{left:110%}100%{left:110%}}
+
+/* ========== 02 初始页 ========== */
+.head-r{text-align:right;margin-bottom:8px}
+.pg[data-e="INITIAL"] .head-r{margin-bottom:26px;padding-bottom:0}
+.head-r .eyebrow{margin-top:2px;text-align:right}
+/* 打字机 */
+.type{display:inline-block;overflow:hidden;white-space:nowrap;border-right:1px solid var(--ink);
+  width:0;animation:none}
+.pg.on .type{animation:typing 1.5s steps(9,end) .2s forwards,caret 1.1s step-end infinite}
+@keyframes typing{to{width:100%}}
+@keyframes caret{0%,100%{border-color:transparent}50%{border-color:var(--ink)}}
+/* 双列信息（建模靠右） */
+.duo{display:flex;flex-direction:column;gap:0}
+.duo .d{display:flex;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--ln2)}
+.duo .d .k{font-family:var(--mono);font-size:8px;letter-spacing:.16em;color:var(--g3)}
+.duo .d .v{margin-left:auto;font-size:11.5px;letter-spacing:.1em;color:var(--ink)}
+.idcard{display:flex;gap:16px;align-items:stretch;background:transparent;border:0}
+.idcard{flex-direction:column;align-items:center;text-align:center;padding:0 0 2px;margin-top:0;position:relative;overflow:visible}
+.idcard::before{content:"";position:absolute;left:50%;top:-6px;width:200px;height:200px;transform:translateX(-50%);
+  border:1px solid var(--ln2);border-radius:50%}
+.idcard::after{content:"";position:absolute;left:50%;top:-34px;width:128px;height:128px;margin-left:-64px;
+  border:1px dashed var(--ln);border-radius:50%;animation:spin 40s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.idcard .ph{width:clamp(84px,23vw,100px);aspect-ratio:1;flex:none;position:relative;z-index:1;border-radius:50%;
+  padding:3px;background:#fff;box-shadow:0 0 0 1px var(--ink),0 6px 22px rgba(0,0,0,.07)}
+.ripple-el{position:absolute;left:50%;top:50%;width:calc(100% + 6px);aspect-ratio:1;transform:translate(-50%,-50%);
+  border-radius:50%;border:1px solid rgba(13,13,13,.2);pointer-events:none;
+  animation:rip 9.5s cubic-bezier(.16,.74,.3,1) infinite;will-change:transform,opacity}
+@keyframes rip{
+  0%{transform:translate(-50%,-50%) scale(.02);opacity:0}
+  12%{opacity:.42}
+  55%{opacity:.2}
+  100%{transform:translate(-50%,-50%) scale(1.95);opacity:0}
+}
+.idcard .ph img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;filter:grayscale(1) contrast(1.06)}
+.idcard .ph::after{content:"HOST";position:absolute;left:50%;bottom:-8px;z-index:3;transform:translateX(-50%);
+  font-family:var(--mono);font-size:7px;letter-spacing:.2em;color:#fff;background:var(--ink);padding:1.5px 7px}
+.idcard .bd{padding:14px 0 0;flex:1;min-width:0;width:100%;position:relative;z-index:1}
+.idcard .nm{font-family:var(--serif);font-size:clamp(18px,5vw,22px);letter-spacing:.24em;text-indent:.24em;font-weight:400}
+.idcard .en{font-family:var(--mono);font-size:8px;letter-spacing:.3em;color:var(--g3);margin-top:5px}
+.chips{margin-top:10px;display:flex;flex-wrap:wrap;gap:5px;justify-content:center}
+.chip{font-family:var(--mono);font-size:8px;letter-spacing:.08em;color:var(--g1);border:1px solid var(--ln);border-radius:9px;padding:1px 7px;background:#fff}
+.meter{margin-top:14px;display:flex;align-items:center;gap:8px;max-width:260px;margin-left:auto;margin-right:auto}
+.meter .track{flex:1;height:2px;background:var(--ln)}
+.meter .track i{display:block;height:100%;background:var(--ink);width:0;transition:width 1.6s var(--e) .6s}
+.pg.on .meter .track i{width:30%}
+.meter .num{font-family:var(--mono);font-size:8.5px;color:var(--g1)}
+.kv{margin-top:12px;border-top:1px solid var(--ln)}
+.kv .r{display:flex;align-items:baseline;gap:10px;padding:7px 2px;border-bottom:1px solid var(--ln2)}
+.kv .k{font-family:var(--mono);font-size:8px;letter-spacing:.14em;color:var(--g3);width:70px;flex:none}
+.kv .v{font-size:11.5px;letter-spacing:.1em;margin-left:auto}
+.grid4{margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--ln)}
+.grid4 .c{background:#fff;padding:11px 12px}
+.grid4 .c .k{font-family:var(--mono);font-size:8px;letter-spacing:.16em;color:var(--g3)}
+.grid4 .c .v{margin-top:3px;font-size:12.5px;letter-spacing:.12em}
+
+/* ========== 03 钟楼 ========== */
+.clockwrap{position:relative;width:min(68vw,208px);aspect-ratio:1;margin:44px auto 0;touch-action:pan-y;cursor:grab}
+.clockwrap:active{cursor:grabbing}
+.dial3{width:100%;height:100%;transition:transform .6s cubic-bezier(.2,1.4,.4,1);will-change:transform}
+.dial3 svg{width:100%;height:100%;display:block}
+.dial3 .hands line{transform-origin:100px 100px}
+.dial3 .hands .hh{animation:sweepH 180s linear infinite}
+.dial3 .hands .mh{animation:sweepM 18s linear infinite}
+@keyframes sweepH{to{transform:rotate(360deg)}}
+@keyframes sweepM{to{transform:rotate(360deg)}}
+.tower{position:relative;text-align:center;padding:2px 0 6px}
+.pg[data-e="TOWER"] .styleA{margin-top:46px}
+.pg[data-e="TOWER"] .head-r{margin-bottom:10px}
+.tower .arch{width:min(64vw,220px);aspect-ratio:5/6;margin:0 auto;position:relative;overflow:visible}
+.tower .arch svg{width:100%;height:100%;display:block}
+.styleA,.styleB{border:1px solid var(--ln);background:#fff;padding:14px 16px;margin-top:12px;position:relative}
+.styleA .tag,.styleB .tag{position:absolute;left:14px;top:-7px;background:#fff;padding:0 6px;font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--ink)}
+.styleA p,.styleB p{font-size:11.5px;line-height:1.95;letter-spacing:.1em;color:var(--g1)}
+.styleA p+p{margin-top:5px}
+.styleB p{color:var(--g2)}
+
+/* ========== 04 见面时刻 ========== */
+.tabbar{display:flex;border-bottom:1px solid var(--ln);gap:22px;margin-top:10px}
+.tabbar b{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--g3);font-weight:400;padding:0 0 8px;position:relative}
+.tabbar b.on{color:var(--ink)}
+.tabbar b.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--ink)}
+.tabbar b i{font-style:normal;opacity:.5}
+.checks{margin-top:6px}
+.checks .ck{display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px dashed var(--ln2)}
+.checks .ck .bx{width:13px;height:13px;border:1px solid var(--ink);flex:none;position:relative}
+.checks .ck .bx::after{content:"";position:absolute;inset:3px;background:var(--ink);opacity:0;transition:.3s var(--e)}
+.checks .ck.done .bx::after{opacity:1}
+.checks .ck .tx{font-size:11.5px;letter-spacing:.1em;color:var(--g1);transition:color .3s}
+.checks .ck.done .tx{color:var(--g3);text-decoration:line-through;text-decoration-thickness:1px}
+.browser{border:1px solid var(--ln);background:#fff;overflow:hidden}
+.browser .top{display:flex;align-items:center;gap:5px;padding:7px 9px;border-bottom:1px solid var(--ln2)}
+.browser .top i{width:5px;height:5px;border-radius:50%;background:var(--ln)}
+.browser .top span{margin-left:6px;font-family:var(--mono);font-size:7.5px;color:var(--g3);letter-spacing:.08em}
+.browser .body{padding:10px 11px 12px}
+.browser .srch{border:1px solid var(--ln);padding:5px 8px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:8.5px;color:var(--g3)}
+.browser .nav2{margin-top:8px;display:flex;gap:12px;font-family:var(--mono);font-size:8.5px;color:var(--g3);letter-spacing:.06em}
+.browser .nav2 .a{color:var(--ink);border-bottom:1px solid var(--ink)}
+.links3{margin-top:12px;display:flex;flex-direction:column;gap:1px;background:var(--ln)}
+.links3 a{background:#fff;display:flex;align-items:center;justify-content:space-between;padding:11px 12px;text-decoration:none;color:var(--ink)}
+.links3 a .l{font-size:12px;letter-spacing:.18em}
+.links3 a .r{font-family:var(--mono);font-size:8px;color:var(--g3);letter-spacing:.1em}
+.links3 a:active{background:var(--bg2)}
+
+/* ========== UI 风点击特效：滑动拖尾光迹 ========== */
+.trail{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:899}
+.ui-ripple{position:fixed;pointer-events:none;z-index:900;border-radius:50%;border:1px solid rgba(13,13,13,.42);
+  animation:uirip 1.9s cubic-bezier(.14,.72,.28,1) forwards}
+@keyframes uirip{from{transform:scale(.18);opacity:.85}to{transform:scale(1);opacity:0}}
+.ui-dot{position:fixed;pointer-events:none;z-index:901;width:4px;height:4px;background:var(--ink);
+  animation:uidot .7s cubic-bezier(.15,.7,.3,1) forwards}
+@keyframes uidot{0%{transform:scale(0);opacity:1}60%{opacity:.6}100%{transform:scale(1);opacity:0}}
+.ui-cross{position:fixed;pointer-events:none;z-index:900;width:26px;height:26px;animation:uix .55s var(--e) forwards}
+.ui-cross::before,.ui-cross::after{content:"";position:absolute;background:rgba(13,13,13,.35)}
+.ui-cross::before{left:50%;top:0;bottom:0;width:1px}
+.ui-cross::after{top:50%;left:0;right:0;height:1px}
+@keyframes uix{0%{opacity:.9;transform:scale(.4)}100%{opacity:0;transform:scale(1.5)}}
+
+/* ========== 05 记录页（全新 UI） ========== */
+.dash{display:flex;flex-direction:column;gap:10px}
+.panel{border:1px solid var(--ln);background:#fff;padding:14px}
+.panel .ph{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+.panel .ph b{font-family:var(--mono);font-size:8.5px;letter-spacing:.24em;color:var(--g3);font-weight:400}
+.panel .ph u{text-decoration:none;font-family:var(--mono);font-size:8px;color:var(--g3)}
+/* 环形进度 */
+/* 弧形刻度仪表（替代圆环） */
+.gauges{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.gbox{text-align:center}
+.gsvg{width:104px;max-width:42vw;height:auto;display:block;margin:0 auto}
+.gsvg{position:relative}
+.gtrack,.gfill{fill:none;stroke-width:2.4}
+.gtrack{stroke:var(--ln2)}
+.gfill{stroke:var(--ink);stroke-linecap:butt;stroke-dasharray:226.2;stroke-dashoffset:226.2;
+  transform:rotate(-90deg);transform-origin:40px 40px;
+  transition:stroke-dashoffset 2s cubic-bezier(.16,.84,.28,1) 1.15s}
+.ghub2{fill:none;stroke:var(--ln2);stroke-width:1;stroke-dasharray:2.5 3.5}
+.gbox{position:relative}
+.gcenter{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.gcenter .gline{display:flex;align-items:baseline;gap:1px}
+.gcenter .gline span{font-size:9px;margin-top:-6px}
+.gcenter b{font-family:var(--mono);font-weight:400;font-size:17px;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.1}
+.gcenter span{font-family:var(--mono);font-size:7px;color:var(--g3);letter-spacing:.12em}
+.gcenter i{font-style:normal;font-family:var(--mono);font-size:6.5px;color:var(--g3);letter-spacing:.24em;margin-top:4px}
+/* 阶段竖排时间线 */
+.steps{position:relative;padding-left:20px}
+.steps::before{content:"";position:absolute;left:5px;top:5px;bottom:5px;width:1px;background:var(--ln)}
+.step{position:relative;padding:7px 0;display:flex;justify-content:space-between;align-items:center}
+.step::before{content:"";position:absolute;left:-19px;top:50%;width:9px;height:9px;margin-top:-4.5px;border:1px solid var(--ink);background:#fff;border-radius:50%}
+.step.full::before{background:var(--ink)}
+.step .n{font-size:11.5px;letter-spacing:.16em;color:var(--g1)}
+.step .n em{font-style:normal;font-family:var(--mono);font-size:8px;color:var(--g3);margin-left:6px;letter-spacing:.1em}
+.step .v{font-family:var(--mono);font-size:9px;color:var(--g1);letter-spacing:.06em}
+/* 条形图 */
+.bars{display:flex;flex-direction:column;gap:9px}
+.bars .row{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:8px;color:var(--g2)}
+.bars .row .nm{width:46px;flex:none;letter-spacing:.06em}
+.bars .row .tr{flex:1;height:6px;background:var(--ln2);position:relative;overflow:hidden}
+.bars .row .tr i{display:block;height:100%;background:var(--ink);width:0;transition:width 1.4s var(--e) .4s}
+.bars .row .pc{width:26px;text-align:right;color:var(--g1)}
+/* 定格钟表：全新数码块设计 */
+.cdl{display:flex;justify-content:center;gap:16px;padding-top:2px}
+.cdl .u{text-align:center}
+.cdl .u .d{display:flex;gap:3px}
+.cdl .u .d b{width:19px;height:26px;border:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-weight:300;font-size:15px;color:var(--ink);background:transparent;letter-spacing:-.02em}
+.cdl .u .d b.flip{animation:numflip .5s var(--e)}
+@keyframes numflip{0%{transform:translateY(-55%);opacity:0}100%{transform:translateY(0);opacity:1}}
+.cdl .u .c{margin-top:5px;font-family:var(--mono);font-size:6.5px;letter-spacing:.16em;color:var(--g3)}
+.cdl .u .c{margin-top:6px;font-family:var(--mono);font-size:7px;letter-spacing:.14em;color:var(--g3)}
+/* 波形轨道：全新 */
+/* 状态灯 */
+.status{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;color:var(--g2)}
+.status .led{width:6px;height:6px;border-radius:50%;background:var(--ink);animation:blink 2.2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:.2}50%{opacity:1}}
+
+@media (max-height:700px){
+  .pg{padding-top:calc(env(safe-area-inset-top,0px) + 42px);padding-bottom:calc(env(safe-area-inset-bottom,0px) + 76px)}
+  .h1{font-size:18px}
+}
+@media (min-width:820px){
+  .pg{padding-left:max(var(--pad),calc((100vw - 640px)/2));padding-right:max(var(--pad),calc((100vw - 640px)/2))}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.up{opacity:1;transform:none}}
+
+
+/* ===== 05 页新增素材 ===== */
+.strip{display:flex;align-items:center;justify-content:space-between;gap:6px;border:1px solid var(--ln);
+  padding:9px 10px;margin-bottom:10px;background:linear-gradient(180deg,#fcfcfc,#fff)}
+.strip .sitem{display:flex;flex-direction:column;gap:2px;min-width:0}
+.strip .sk{font-family:var(--mono);font-size:6.5px;letter-spacing:.24em;color:var(--g3)}
+.strip .sv{font-family:var(--mono);font-size:8.5px;letter-spacing:.04em;color:var(--ink);white-space:nowrap}
+.strip .sdiv{width:1px;height:20px;background:var(--ln2)}
+.gfoot{display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px dashed var(--ln2)}
+.gfoot>div{display:flex;align-items:baseline;gap:4px}
+.gfoot .k{font-family:var(--mono);font-size:7px;letter-spacing:.18em;color:var(--g3)}
+.gfoot .v{font-family:var(--mono);font-size:11px;color:var(--ink);font-variant-numeric:tabular-nums}
+.gfoot em{font-style:normal;font-family:var(--mono);font-size:7px;color:var(--g3)}
+.calc{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;font-family:var(--mono);font-size:7.5px;letter-spacing:.06em;color:var(--g3)}
+.calc .eq{color:var(--g3)}
+.calc .now{color:var(--ink);border-bottom:1px solid var(--ink);padding-bottom:1px}
+.status .led.dim{background:transparent;border:1px solid var(--g3);animation:none}
+
+/* 记录页显现场景：面板逐块抬升 + 内容内部渐显 */
+.pg[data-e="LOG"] .up{transition-duration:2.1s}
+.pg[data-e="LOG"] .dash>.panel{opacity:0;transform:translateY(30px) scale(.985);filter:blur(5px)}
+.pg.on[data-e="LOG"] .dash>.panel{opacity:1;transform:none;filter:blur(0);
+  transition:opacity 1.7s var(--e),transform 2s cubic-bezier(.16,.84,.28,1),filter 1.5s var(--e)}
+.pg.on[data-e="LOG"] .dash>.panel:nth-child(1){transition-delay:.35s}
+.pg.on[data-e="LOG"] .dash>.panel:nth-child(2){transition-delay:.85s}
+.pg.on[data-e="LOG"] .dash>.panel:nth-child(3){transition-delay:1.35s}
+.pg.on[data-e="LOG"] .dash>.panel:nth-child(4){transition-delay:1.85s}
+.pg.on[data-e="LOG"] .strip{transition-delay:.1s}
+.pg.on[data-e="LOG"] .head-r{transition-delay:.02s}
+/* 内部细节：延迟跟随 */
+.pg.on[data-e="LOG"] .gfill{transition-delay:1.15s;transition-duration:2s}
+.pg.on[data-e="LOG"] .gneedle{transition-delay:1.15s;transition-duration:2s cubic-bezier(.16,.84,.28,1)}
+.pg.on[data-e="LOG"] .bars .row .tr i{transition-delay:1.65s;transition-duration:1.8s}
+.pg.on[data-e="LOG"] .steps .step{animation:stepIn 1.2s var(--e) both}
+@keyframes stepIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+/* 面板顶部细线扫光：进入时从左到右划过 */
+.panel{position:relative;overflow:hidden}
+.panel::after{content:"";position:absolute;left:0;top:0;height:1px;width:100%;transform:scaleX(0);transform-origin:left;
+  background:linear-gradient(90deg,transparent,rgba(13,13,13,.5),transparent)}
+.pg.on[data-e="LOG"] .panel::after{animation:sweep 1.6s cubic-bezier(.16,.84,.28,1) forwards}
+.pg.on[data-e="LOG"] .dash>.panel:nth-child(1)::after{animation-delay:.45s}
+.pg.on[data-e="LOG"] .dash>.panel:nth-child(2)::after{animation-delay:.95s}
+.pg.on[data-e="LOG"] .dash>.panel:nth-child(3)::after{animation-delay:1.45s}
+.pg.on[data-e="LOG"] .dash>.panel:nth-child(4)::after{animation-delay:1.95s}
+@keyframes sweep{0%{transform:scaleX(0)}100%{transform:scaleX(1)}}
+/* 章节节点：逐个点亮 */
+.pg.on[data-e="LOG"] .steps .step:nth-child(1){animation-delay:1.05s}
+.pg.on[data-e="LOG"] .steps .step:nth-child(2){animation-delay:1.2s}
+.pg.on[data-e="LOG"] .steps .step:nth-child(3){animation-delay:1.35s}
+.pg.on[data-e="LOG"] .steps .step:nth-child(4){animation-delay:1.5s}
+.pg.on[data-e="LOG"] .steps .step:nth-child(5){animation-delay:1.65s}
+/* 倒计时数字逐位落位 */
+.pg.on[data-e="LOG"] .cdl .u{animation:cdIn 1.3s cubic-bezier(.16,.84,.28,1) both}
+.pg.on[data-e="LOG"] .cdl .u:nth-child(2){animation-delay:.14s}
+.pg.on[data-e="LOG"] .cdl .u:nth-child(3){animation-delay:.24s}
+.pg.on[data-e="LOG"] .cdl .u:nth-child(4){animation-delay:.34s}
+@keyframes cdIn{from{opacity:0;transform:translateY(-14px);filter:blur(4px)}to{opacity:1;transform:none;filter:blur(0)}}
+
+/* 头像波纹舞台：裁剪在圆形内，不溢出到标题 */
+
+/* 头像波纹：从头像中心向下外侧扩散，顶部被限制不触及标题 */
+/* 第二页头像波纹：圆心就在头像正中，由中心慢慢向四周散开 */
+.idcard .ph .ripple-el{width:100%;left:50%;top:50%;transform-origin:50% 50%;border-color:rgba(13,13,13,.26);z-index:-1}
+/* 只保留一条：其余波纹隐藏 */
+.idcard .ph .ripple-el{animation:ripSingle 3.8s cubic-bezier(.16,.74,.3,1) infinite}
+@keyframes ripSingle{
+  0%{transform:translate(-50%,-50%) scale(.72);opacity:0}
+  18%{opacity:.55}
+  100%{transform:translate(-50%,-50%) scale(2.05);opacity:0}
+}
+
+/* 初始页：动画整体放慢 */
+.pg[data-e="INITIAL"] .up{transition:opacity 1.5s var(--e),transform 1.7s cubic-bezier(.19,.9,.24,1),filter 1.5s var(--e)}
+.pg[data-e="INITIAL"].on .up:nth-child(1){transition-delay:.2s}
+.pg[data-e="INITIAL"].on .up:nth-child(2){transition-delay:.35s}
+.pg[data-e="INITIAL"].on .up:nth-child(3){transition-delay:.55s}
+.pg[data-e="INITIAL"].on .up:nth-child(4){transition-delay:.72s}
+.pg[data-e="INITIAL"].on .up:nth-child(5){transition-delay:.88s}
+.pg[data-e="INITIAL"].on .up:nth-child(6){transition-delay:1.02s}
+.pg[data-e="INITIAL"] .meter .track i{transition:width 2.6s var(--e) 1s}
+.pg[data-e="INITIAL"] .idcard::after{animation-duration:64s}
+.pg.on[data-e="INITIAL"] .type{animation-duration:2.2s,1.4s}
+
+/* 初始页动画兜底：确保最终显现 */
+.pg[data-e="INITIAL"].on .up{opacity:1;transform:none;filter:blur(0)}
+
+/* 加载兜底：进入页面 2.4s 后移除过渡，避免任何卡在半透明状态 */
+.pg.on .up.settled{transition:none;opacity:1;transform:none;filter:none}
+
+/* 第一页：元素由远及近逐个浮现，速度放慢、节奏递增 */
+.pg[data-e="INVITE"] .up{opacity:0;transform:translateY(26px) scale(.98);filter:blur(8px);
+  transition:opacity 1.9s cubic-bezier(.16,.84,.28,1),transform 2.1s cubic-bezier(.16,.84,.28,1),filter 1.7s var(--e)}
+.pg[data-e="INVITE"].on .up{opacity:1;transform:none;filter:blur(0)}
+.pg[data-e="INVITE"].on .up:nth-child(1){transition-delay:.15s}
+.pg[data-e="INVITE"].on .up:nth-child(2){transition-delay:.62s}
+.pg[data-e="INVITE"].on .up:nth-child(3){transition-delay:1.18s}
+.pg[data-e="INVITE"].on .up:nth-child(4){transition-delay:1.86s}
+.pg[data-e="INVITE"].on .up:nth-child(5){transition-delay:2.62s}
+/* 环 + 轨道点稍慢出现 */
+.pg[data-e="INVITE"] .ring{opacity:0;transition:opacity 2.4s var(--e) .9s}
+.pg[data-e="INVITE"].on .ring{opacity:1;transition:opacity 3.2s var(--e) .7s}
+.pg[data-e="INVITE"].on .orbit,.pg[data-e="INVITE"].on .dot{opacity:1}
+.pg[data-e="INVITE"].on .dot{opacity:.85}
+
+/* ===== 全局特效：漂浮墨尘（所有页面统一氛围，极淡） ===== */
+#dust{position:fixed;inset:0;z-index:5;pointer-events:none;overflow:hidden}
+#dust i{position:absolute;display:block;border-radius:50%;background:var(--ink);
+  opacity:0;animation:dustFloat linear infinite;will-change:transform,opacity}
+@keyframes dustFloat{
+  0%{transform:translateY(8vh) scale(1);opacity:0}
+  12%{opacity:var(--o,.16)}
+  85%{opacity:var(--o,.16)}
+  100%{transform:translateY(-92vh) scale(.6);opacity:0}
+}
+@media (prefers-reduced-motion:reduce){#dust{display:none}}
+
+/* ===== 全页贯通的底部声波 ===== */
+#wavebar{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 52px);height:30px;z-index:40;pointer-events:none;
+  opacity:0;transform:translateY(8px);transition:opacity 1.4s var(--e),transform 1.4s var(--e);
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent)}
+#wavebar.on{opacity:1;transform:none}
+#wavebar svg{width:100%;height:100%;display:block}
+#wavebar.muted #wavePath{stroke-opacity:.1}
+@media (prefers-reduced-motion:reduce){#wavebar{opacity:1}}
+
+/* 第一页不显示底部声波 */
+.pg[data-e="INVITE"] ~ #wavebar{opacity:0}
+body[data-page="0"] #wavebar{opacity:0!important;transform:translateY(8px)!important}
+
+/* ===== 全局细节美化 ===== */
+/* 面板投影更轻更雅 */
+.panel{box-shadow:0 12px 32px -24px rgba(0,0,0,.14)}
+/* 顶部进度条加渐细端头 */
+#bar{background:linear-gradient(90deg,var(--ink) 82%,rgba(13,13,13,.25))}
+/* 底部导航玻璃感提升 */
+#rail{border-color:rgba(13,13,13,.08);box-shadow:0 10px 30px -14px rgba(0,0,0,.16),0 0 0 1px rgba(255,255,255,.7) inset}
+/* 章节时间线节点带柔光 */
+.step::before{box-shadow:0 0 0 3px rgba(13,13,13,.05)}
+/* 进度横条端头圆滑 */
+.bars .row .tr{border-radius:2px}
+.bars .row .tr i{border-radius:2px}
+/* 倒计时数字底加淡刻度线 */
+.cdl .u .d b{border-bottom:1px solid var(--ln2);padding-bottom:2px}
+/* 摘要带细分隔更雅 */
+.strip{box-shadow:0 10px 26px -22px rgba(0,0,0,.12)}
+/* 音乐指示器更精致 */
+#bgm{border-radius:0}
+/* 圆形进度环中心数字更聚焦 */
+.gcenter b{text-shadow:0 1px 0 rgba(255,255,255,.9)}
+/* 第三页风格卡更柔和 */
+.styleA,.styleB{background:rgba(255,255,255,.72);border:1px solid var(--ln2);padding:10px 12px;
+  box-shadow:0 10px 26px -24px rgba(0,0,0,.12)}
+.styleA p,.styleB p{margin:2px 0}
+/* 链接行悬浮态 */
+.links3 a{transition:background .45s var(--e),border-color .45s var(--e)}
+.links3 a:active{background:var(--bg2);border-color:var(--ln)}
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<div id="hud"><b>CLOCK TRACK</b><span></span>HE YE</div>
+<div id="rail"></div>
+
+<div id="dust" aria-hidden="true"></div>
+<!-- 全页贯通的底部声波（所有页面显示） -->
+<div id="wavebar" aria-hidden="true">
+  <svg viewBox="0 0 900 30" preserveAspectRatio="none">
+    <path id="wavePath" d="" fill="none" stroke="#0d0d0d" stroke-width=".7" stroke-opacity=".45"/>
+  </svg>
+</div>
+<div id="deck">
+
+  <!-- 01 邀约 -->
+  <section class="pg on" data-t="邀约" data-e="INVITE">
+    <div class="wrap">
+      <div class="invite">
+        <div class="rip"><i></i><i></i><i></i></div>
+        <div class="orbit"></div>
+        <div class="ring"></div>
+        <div class="dot"></div>
+        <div class="up eyebrow top-sys">SYSTEM · 01</div>
+        <div class="up mid">
+          <div class="t1">叮 … 系统已绑定新宿主</div>
+          <div class="t2">指针 <em>停摆</em> · 时间的转速 · <em>相悖</em>的命运</div>
+        </div>
+        <div class="up consent">
+          <span class="cnr tl"></span><span class="cnr tr"></span><span class="cnr bl"></span><span class="cnr br"></span>
+          <div class="qt"><span>CONSENT · REQUEST</span><span>#0001</span></div>
+          <div class="q"><span>是否寻找"祂"</span><span class="dotline"></span><span id="qMark">—</span></div>
+          <div class="pick">
+            <button class="pb" data-v="1">是 · YES</button>
+            <button class="pb" data-v="0">否 · NO</button>
+          </div>
+          <button class="go" id="goBtn" disabled>确 认</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 初始页 -->
+  <section class="pg scroll" data-t="初始页" data-e="INITIAL">
+    <div class="wrap">
+      <div class="up head-r">
+        <h2 class="h1 type" style="font-size:clamp(17px,4.6vw,22px)">初始页</h2>
+        <div class="eyebrow">INITIAL LAND · 02</div>
+      </div>
+      <div class="up idcard">
+        <div class="ph"><img src="https://cdn.jsdmirror.com/gh/qingfengqaq/why-rosl-deploy@main/1.png" alt="十允"></div>
+        <div class="bd">
+          <div class="nm">十 允</div>
+          <div class="en">SHI YUN · HOST</div>
+          <div class="chips"><span class="chip">LE-T</span><span class="chip">20</span><span class="chip">女</span><span class="chip">ENTP</span></div>
+          <div class="meter"><span class="track"><i></i></span><span class="num">30%</span></div>
+        </div>
+      </div>
+      <div class="up kv">
+        <div class="r"><span class="k">NAME</span><span class="v">十 允</span></div>
+        <div class="r"><span class="k">GENDER</span><span class="v">女</span></div>
+        <div class="r"><span class="k">AGE</span><span class="v">20</span></div>
+        <div class="r"><span class="k">CODE</span><span class="v">LE-T</span></div>
+        <div class="r"><span class="k">STAR</span><span class="v">未知</span></div>
+        <div class="r"><span class="k">MBTI</span><span class="v">ENTP</span></div>
+      </div>
+      <div class="up duo">
+        <div class="d"><span class="k">驻 团</span><span class="v">十年</span></div>
+        <div class="d"><span class="k">建 模</span><span class="v">耳虚 · 耳菇</span></div>
+      </div>
+      <div class="up mono" style="margin-top:26px;text-align:center;font-size:8px;letter-spacing:.22em;color:var(--g3)">
+        ARCHIVE · 逐字归档中 <span style="margin:0 6px;color:var(--ln)">/</span> 每一次读取都会留下痕迹
+      </div>
+      <div class="up mono" style="margin-top:8px;text-align:center;font-size:7.5px;letter-spacing:.18em;color:var(--ln2)">
+        SERIAL NO. LE-T-0001 — SIGNAL STABLE
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 抵达钟楼 -->
+  <section class="pg scroll" data-t="钟楼" data-e="TOWER">
+    <div class="wrap">
+      <div class="up head-r">
+        <h2 class="h1" style="font-size:clamp(17px,4.6vw,22px)">抵达钟楼</h2>
+        <div class="eyebrow">BELL TOWER · 03</div>
+      </div>
+      <div class="up tower">
+        <div class="clockwrap" id="clockWrap">
+          <span class="ripple-el" style="animation-delay:0s"></span>
+          <span class="ripple-el" style="animation-delay:1.4s"></span>
+          <span class="ripple-el" style="animation-delay:2.8s"></span>
+          <div class="dial3" id="dial3">
+            <svg viewBox="0 0 200 200">
+              <circle cx="100" cy="100" r="96" fill="none" stroke="#ececec" stroke-width="1"/>
+              <circle cx="100" cy="100" r="86" fill="none" stroke="#0d0d0d" stroke-width=".8"/>
+              <g id="ticks" stroke="#0d0d0d"></g>
+              <g class="hands">
+                <line class="hh" x1="100" y1="100" x2="100" y2="46" stroke="#0d0d0d" stroke-width="1.6" stroke-linecap="round"/>
+                <line class="mh" x1="100" y1="100" x2="142" y2="128" stroke="#0d0d0d" stroke-width="2.2" stroke-linecap="round"/>
+              </g>
+              <circle cx="100" cy="100" r="3.2" fill="#0d0d0d"/>
+            </svg>
+          </div>
+        </div>
+        <div class="mono" style="font-size:8.5px;letter-spacing:.3em;color:var(--g3);margin-top:52px">旋转指针 · 让时间重新流动</div>
+      </div>
+      <div class="up styleA"><span class="tag">(A)</span>
+        <p>非典型虐剖析 · 意识流 · 安抚向</p>
+        <p class="dim">偶尔锐利刺痛感概率涉三</p>
+        <p class="dim">理性淡漠 · 中低恋 · 白话 · 共情</p>
+      </div>
+      <div class="up styleB"><span class="tag">(B)</span>
+        <p>典型虐 · 恨海情天 · 遮喉无力</p>
+      </div>
+      <div class="up mono" style="margin-top:12px;display:flex;justify-content:space-between;font-size:8px;letter-spacing:.16em;color:var(--g3)">
+        <span>CLOCK DRIFT +00:00:47</span><span>指针滞后 · 校准中</span>
+      </div>
+      <div class="up" style="margin-top:16px;display:flex;justify-content:space-between;align-items:center">
+        <span class="eyebrow">COMPLETENESS</span>
+        <span class="mono" style="font-size:11px">59 %</span>
+      </div>
+      <div class="up rule" style="margin-top:8px"></div>
+    </div>
+  </section>
+
+  <!-- 04 见面时刻 -->
+  <section class="pg scroll" data-t="见面" data-e="MEET">
+    <div class="wrap">
+      <div class="up eyebrow">ENCOUNTER · 04</div>
+      <h2 class="up h1" style="font-size:clamp(19px,5.2vw,26px);margin:6px 0 4px">时 间 必 须 流 动</h2>
+      <div class="up dim" style="font-size:11px;letter-spacing:.14em;margin-bottom:14px">爱才能存在</div>
+
+      <div class="up">
+        <div class="eyebrow" style="margin-bottom:2px">祂的禁忌</div>
+        <div class="tabbar"><b class="on">须知查阅<i> / NOTICE</i></b><b>档案<i> / FILE</i></b></div>
+        <div class="checks" id="checks">
+          <div class="ck"><span class="bx"></span><span class="tx">不越界 · 不试探底线</span></div>
+          <div class="ck"><span class="bx"></span><span class="tx">不接受虚假与敷衍</span></div>
+          <div class="ck"><span class="bx"></span><span class="tx">时间必须流动，爱才能存在</span></div>
+        </div>
+        <div class="mono" style="margin-top:8px;font-size:7.5px;letter-spacing:.16em;color:var(--g3)">※ 违反任意一条 · 同步将立即中断</div>
+      </div>
+
+      <div class="up" style="margin-top:16px">
+        <div class="eyebrow" style="margin-bottom:8px">特殊 · 祂的过往</div>
+        <div class="browser">
+          <div class="top"><i></i><i></i><i></i><span>kdocs.cn / shi-yun</span></div>
+          <div class="body">
+            <div class="srch"><span>search</span><span>⌕</span></div>
+            <div class="nav2"><span class="a">profile</span><span>home</span><span>gallery</span><span>events</span></div>
+          </div>
+        </div>
+        <div class="links3">
+          <a href="https://www.kdocs.cn/l/cl3LF3mM2ysM" target="_blank" rel="noopener"><span class="l">随 笔</span><span class="r">ESSAY ↗</span></a>
+          <a href="https://www.kdocs.cn/l/crEWXUgTeLQZ" target="_blank" rel="noopener"><span class="l">板 评</span><span class="r">BOARD ↗</span></a>
+          <a href="https://www.kdocs.cn/l/cekQoIF3IsOp" target="_blank" rel="noopener"><span class="l">礼 赠</span><span class="r">GIFT ↗</span></a>
+        </div>
+      </div>
+      <div class="up mono" style="text-align:right;font-size:8.5px;color:var(--g3);letter-spacing:.14em;margin-top:14px">已进入攻略目标所属区域</div>
+    </div>
+  </section>
+
+  <!-- 05 记录页：全新 UI -->
+  <section class="pg scroll" data-t="记录" data-e="LOG">
+    <div class="wrap">
+      <div class="up head-r">
+        <h2 class="h1 type2" style="font-size:clamp(17px,4.6vw,22px)">记录页</h2>
+        <div class="eyebrow">RECORD · 05</div>
+      </div>
+
+      <!-- 摘要带：编号 / 状态 / 时间戳 -->
+      <div class="up strip">
+        <div class="sitem"><span class="sk">ID</span><span class="sv">LE-T · 0001</span></div>
+        <div class="sdiv"></div>
+        <div class="sitem"><span class="sk">PHASE</span><span class="sv">已完成 04/04</span></div>
+        <div class="sdiv"></div>
+        <div class="sitem"><span class="sk">LEGACY</span><span class="sv">未完待续</span></div>
+      </div>
+
+      <div class="up dash">
+        <!-- 面板1：双环 -->
+        <div class="panel">
+          <div class="ph"><b>SYNC STATUS</b><u>LIVE</u></div>
+          <div class="gauges">
+            <div class="gbox">
+              <svg class="gsvg" viewBox="0 0 80 80">
+                <circle class="gtrack" cx="40" cy="40" r="36"/>
+                <circle class="gfill gcirc" cx="40" cy="40" r="36" data-p="100"/>
+                <circle class="ghub2" cx="40" cy="40" r="27"/>
+              </svg>
+              <div class="gcenter"><span class="gline"><b class="gnum" data-p="100">0</b><span>%</span></span><i>了解指数</i></div>
+            </div>
+            <div class="gbox">
+              <svg class="gsvg" viewBox="0 0 80 80">
+                <circle class="gtrack" cx="40" cy="40" r="36"/>
+                <circle class="gfill gcirc" cx="40" cy="40" r="36" data-p="100"/>
+                <circle class="ghub2" cx="40" cy="40" r="27"/>
+              </svg>
+              <div class="gcenter"><span class="gline"><b class="gnum" data-p="100">0</b><span>%</span></span><i>好感度</i></div>
+            </div>
+          </div>
+          <div class="gfoot">
+            <div><span class="k">样本</span><span class="v" data-count="1284">0</span></div>
+            <div><span class="k">时延</span><span class="v" data-count="418">0</span><em>ms</em></div>
+            <div><span class="k">同步</span><span class="v">双向</span></div>
+          </div>
+        </div>
+
+        <!-- 面板2：阶段时间线 -->
+        <div class="panel">
+          <div class="ph"><b>CHAPTERS</b><u>04 / 04</u></div>
+          <div class="steps">
+            <div class="step full"><span class="n">绑定系统<em>BIND</em></span><span class="v">0 · 0</span></div>
+            <div class="step full"><span class="n">第一章 · 信息<em>INFO</em></span><span class="v">30 · 20</span></div>
+            <div class="step full"><span class="n">第二章 · 风格<em>STYLE</em></span><span class="v">59 · 70</span></div>
+            <div class="step full"><span class="n">第三章 · 须知<em>NOTICE</em></span><span class="v">95 · 99</span></div>
+            <div class="step full"><span class="n">第四章 · 过往<em>PAST</em></span><span class="v">100 · 100</span></div>
+          </div>
+        </div>
+
+        <!-- 面板3：横向条 -->
+        <div class="panel">
+          <div class="ph"><b>INDEX</b><u>%</u></div>
+          <div class="bars">
+            <div class="row"><span class="nm">信息</span><span class="tr"><i data-w="30"></i></span><span class="pc">30</span></div>
+            <div class="row"><span class="nm">风格</span><span class="tr"><i data-w="59"></i></span><span class="pc">59</span></div>
+            <div class="row"><span class="nm">须知</span><span class="tr"><i data-w="95"></i></span><span class="pc">95</span></div>
+            <div class="row"><span class="nm">过往</span><span class="tr"><i data-w="100"></i></span><span class="pc">100</span></div>
+          </div>
+        </div>
+
+        <!-- 面板4：定格时间 + 波形轨道 -->
+        <div class="panel">
+          <div class="ph"><b>COUNTING</b><u>属于你的时间</u></div>
+          <div class="cdl">
+            <div class="u"><div class="d" id="dD"></div><div class="c">DAYS</div></div>
+            <div class="u"><div class="d" id="dH"></div><div class="c">HRS</div></div>
+            <div class="u"><div class="d" id="dM"></div><div class="c">MIN</div></div>
+            <div class="u"><div class="d" id="dS"></div><div class="c">SEC</div></div>
+          </div>
+          <div class="mono" style="margin-top:12px;text-align:center;font-size:7.5px;letter-spacing:.2em;color:var(--g3)">TIME FLIES FOR YOU ONLY · 此钟只为你停留</div>
+        </div>
+      </div>
+      <div class="up mono" style="margin-top:14px;text-align:center;font-size:7.5px;letter-spacing:.22em;color:var(--ln2)">END OF RECORD — 但故事仍在继续书写</div>
+    </div>
+  </section>
+
+</div>
+
+<div id="foot">
+  <span id="fL">01</span>
+  <span id="fR">05</span>
+</div>
+
+<script>
+/* ===== 数据 ===== */
+const deck=document.getElementById('deck');
+const pgs=[...document.querySelectorAll('.pg')];
+const rail=document.getElementById('rail');
+const bar=document.getElementById('bar');
+const fL=document.getElementById('fL'),fR=document.getElementById('fR');
+const ruler=document.getElementById('ruler');
+
+pgs.forEach((p,i)=>{
+  const b=document.createElement('button');
+  b.innerHTML='<span>0'+(i+1)+'</span><i></i>';
+  b.onclick=()=>go(i);
+  rail.appendChild(b);
+});
+const dots=[...rail.children];
+let cur=0,busy=false;
+
+function mark(i,skipMusic){
+  cur=i;
+  if(typeof tick==='function'&&i===4)tick();   /* 重新进入记录页：立即同步倒计时 */
+  document.body.dataset.page=i;
+  dots.forEach((d,k)=>d.classList.toggle('on',k===i));
+  pgs.forEach((p,k)=>p.classList.toggle('on',k===i));
+  bar.style.width=((i+1)/pgs.length*100)+'%';
+  fL.textContent='0'+(i+1);
+  if(i===pgs.length-1)runRings();
+  if(typeof replayType==='function')setTimeout(replayType,60);
+  /* 音乐：每次进入初始页（第 2 页）换一首，与上次不重复 */
+  if(i===1&&!skipMusic&&typeof playTrack==='function')setTimeout(()=>playTrack(),260);
+  /* 加载兜底：当前页元素在动画窗口结束后固化显现 */
+  clearTimeout(window.__settleT);
+  window.__settleT=setTimeout(()=>{
+    pgs.forEach(pg=>{
+      pg.querySelectorAll('.up').forEach(el=>el.classList.toggle('settled',pg.classList.contains('on')));
+    });
+  },2600);
+  /* 滚动复位 */
+  pgs[i].scrollTop=0;
+}
+
+/* 重力翻页：先加速冲出去，再靠惯性缓缓落位；松手不足则弹回 */
+function go(i,fd,skipMusic){
+  if(busy||i===cur||i<0||i>=pgs.length)return;
+  /* 门禁：从第一页进入必须先选「是 · YES」并点确认 */
+  if(cur===0&&i>0&&pick!=='1')return;
+  busy=true;
+  deck.classList.remove('snap');           /* 使用重力曲线 */
+  deck.style.transform='translate3d(-'+(i*100)+'%,0,0)';
+  mark(i,skipMusic);
+  setTimeout(()=>{busy=false;},980);
+}
+
+/* ===== 拖拽跟手 ===== */
+let sx=0,sy=0,dx=0,dragging=false,locked=false,startY=0,lx=0,lt=0,vx=0;
+deck.addEventListener('touchstart',e=>{
+  if(e.touches.length!==1)return;
+  if(e.target.closest('a,.pb,.go')){dragging=false;return;}
+  sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;lx=sx;lt=performance.now();vx=0;
+  dragging=true;locked=false;
+  deck.style.transition='none';
+},{passive:true});
+deck.addEventListener('touchmove',e=>{
+  if(!dragging)return;
+  const mx=e.touches[0].clientX-sx,my=e.touches[0].clientY-sy;
+  if(!locked){
+    if(Math.abs(my)>12&&Math.abs(my)>Math.abs(mx)){dragging=false;deck.classList.add('snap');deck.style.transform='translate3d(-'+(cur*100)+'%,0,0)';return;}
+    if(Math.abs(mx)>8)locked=true;else return;
+  }
+  const W=window.innerWidth;
+  dx=mx;
+  /* 记录横向速度：动量翻页用（px/ms） */
+  const now=performance.now(),dt=now-lt;
+  if(dt>0){vx=.8*vx+.2*(e.touches[0].clientX-lx)/dt;lx=e.touches[0].clientX;lt=now;}
+  const gateMove=cur===0&&pick!=='1';
+  if(gateMove&&dx<0)dx*=.14;                          /* 未解锁：向左拖几乎无跟手 */
+  else if((cur===0&&dx>0)||(cur===pgs.length-1&&dx<0))dx*=.28;
+  deck.style.transform='translate3d(calc(-'+(cur*100)+'% + '+dx+'px),0,0)';
+},{passive:true});
+deck.addEventListener('touchend',()=>{
+  if(!dragging){dragging=false;return;}
+  dragging=false;
+  setTimeout(()=>{deck.classList.remove('snap');},600);
+  const W=window.innerWidth;
+  deck.style.transition='';
+  /* 第一页门禁：未选「是 · YES」时禁止滑向下一页 */
+  const gate=cur===0&&pick!=='1';
+  /* 动量判定：距离足够，或快速轻扫（速度 > 0.55px/ms 且有位移意图）均可翻页 */
+  const fling=Math.abs(vx)>0.55&&Math.abs(dx)>W*.05&&Math.sign(vx)===Math.sign(dx);
+  if(!gate&&(dx<-W*.18||(fling&&dx<0))&&cur<pgs.length-1)go(cur+1);
+  else if(!gate&&(dx>W*.18||(fling&&dx>0))&&cur>0)go(cur-1);
+  else{deck.classList.add('snap');deck.style.transform='translate3d(-'+(cur*100)+'%,0,0)';}
+  dx=0;
+});
+/* 桌面滚轮/键盘 */
+window.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key==='PageDown')go(cur+1);
+  if(e.key==='ArrowLeft'||e.key==='PageUp')go(cur-1);
+});
+
+/* ===== 01 邀约交互 ===== */
+const pbs=[...document.querySelectorAll('.pb')];
+const goBtn=document.getElementById('goBtn');
+const qMark=document.getElementById('qMark');
+let pick=null;
+pbs.forEach(b=>b.onclick=()=>{
+  pbs.forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  pick=b.dataset.v;
+  qMark.textContent=pick==='1'?'YES':'NO';
+  goBtn.disabled=false;
+});
+goBtn.onclick=()=>{
+  if(goBtn.disabled)return;
+  if(pick==='1'){ensureMusic();go(1,null,true);}
+  else{qMark.textContent='—';goBtn.disabled=true;pbs.forEach(x=>x.classList.remove('on'));pick=null;}
+};
+
+/* ===== 02 声波条 ===== */
+
+/* ===== 04 禁忌勾选 ===== */
+document.querySelectorAll('#checks .ck').forEach(c=>{
+  c.onclick=()=>c.classList.toggle('done');
+});
+
+/* ===== 05 数据动画 ===== */
+function runRings(){
+  /* 完整圆周 = 2π × 36 ≈ 226.19 */
+  const LEN=2*Math.PI*36;
+  document.querySelectorAll('.gbox').forEach(b=>{
+    const p=+b.querySelector('.gfill').dataset.p;
+    const f=b.querySelector('.gfill');
+    f.style.strokeDashoffset=LEN;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      f.style.strokeDashoffset=LEN*(1-p/100);
+    }));
+    /* 数字滚动 */
+    const num=b.querySelector('.gnum');const t0=performance.now(),dur=1900;
+    function step(t){const k=Math.min(1,(t-t0)/dur);num.textContent=Math.round(p*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(step);}
+    requestAnimationFrame(step);
+  });
+  document.querySelectorAll('.bars .tr i').forEach(i=>{i.style.width=i.dataset.w+'%';});
+}
+
+/* ===== 链接兜底 ===== */
+const isWC=/MicroMessenger/i.test(navigator.userAgent);
+document.querySelectorAll('.links3 a').forEach(a=>{
+  a.addEventListener('click',e=>{
+    e.preventDefault();
+    const u=a.href;
+    if(!isWC){const w=window.open(u,'_blank');if(w){try{w.opener=null}catch(_){};return;}}
+    location.href=u;
+  });
+});
+
+
+/* ===== 头像波纹：仅一条，从中心淡淡扩散、消失、循环 ===== */
+const avaPh=document.querySelector('.idcard .ph');
+if(avaPh){
+  const r=document.createElement('span');
+  r.className='ripple-el';
+  avaPh.appendChild(r);
+}
+
+/* ===== 第三页：可点击旋转的时钟 ===== */
+const dial=document.getElementById('dial3');
+const cw=document.getElementById('clockWrap');
+if(dial&&cw){
+  /* 刻度 */
+  const ticks=document.getElementById('ticks');
+  for(let i=0;i<60;i++){
+    const a=i*6*Math.PI/180, big=i%5===0;
+    const r1=big?74:79, r2=83;
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1',100+Math.sin(a)*r1);l.setAttribute('y1',100-Math.cos(a)*r1);
+    l.setAttribute('x2',100+Math.sin(a)*r2);l.setAttribute('y2',100-Math.cos(a)*r2);
+    l.setAttribute('stroke-width',big?1.4:.6);
+    l.setAttribute('opacity',big?1:.4);
+    ticks.appendChild(l);
+  }
+  let rot=0;
+  function spin(){rot+=360*2;dial.style.transform='rotate('+rot+'deg)';}
+  cw.addEventListener('click',e=>{
+    spin();
+    /* 波纹扩散（细线环，随时间拖尾渐细） */
+    const rect=cw.getBoundingClientRect(),cx=rect.left+rect.width/2,cy=rect.top+rect.height/2;
+    for(let k=0;k<2;k++){
+      const r=document.createElement('div');r.className='ui-ripple';
+      const sz=90+k*60;
+      r.style.cssText='left:'+(cx-sz/2)+'px;top:'+(cy-sz/2)+'px;width:'+sz+'px;height:'+sz+'px;animation-delay:'+(k*130)+'ms;border-width:'+(k?'.5px':'1px');
+      document.body.appendChild(r);setTimeout(()=>r.remove(),1150+k*130);
+    }
+    for(let k=0;k<8;k++){
+      const d=document.createElement('div');d.className='ui-dot';
+      const a=Math.random()*Math.PI*2,dist=40+Math.random()*50;
+      d.style.cssText='left:'+cx+'px;top:'+cy+'px;--dx:'+Math.cos(a)*dist+'px;--dy:'+Math.sin(a)*dist+'px';
+      document.body.appendChild(d);
+      d.animate([{transform:'translate(-50%,-50%) scale(0)',opacity:1},{transform:'translate(calc(-50% + '+Math.cos(a)*dist+'px),calc(-50% + '+Math.sin(a)*dist+'px)) scale(1)',opacity:0}],{duration:700,easing:'cubic-bezier(.15,.7,.3,1)'});
+      setTimeout(()=>d.remove(),760);
+    }
+  });
+}
+
+/* ===== 拖动光迹：位置连续、渐显渐隐、首尾拖尾 ===== */
+(function(){
+  const NS='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(NS,'svg');
+  svg.setAttribute('class','trail');svg.setAttribute('preserveAspectRatio','none');
+  const g=document.createElementNS(NS,'g');
+  /* 主光带：较粗的柔和描边 */
+  const glow=document.createElementNS(NS,'path');
+  glow.setAttribute('fill','none');glow.setAttribute('stroke','#0d0d0d');
+  glow.setAttribute('stroke-width','6');glow.setAttribute('stroke-opacity','.07');
+  glow.setAttribute('stroke-linecap','round');glow.setAttribute('stroke-linejoin','round');
+  /* 细线：清晰的主线 */
+  const line=document.createElementNS(NS,'path');
+  line.setAttribute('fill','none');line.setAttribute('stroke','#0d0d0d');
+  line.setAttribute('stroke-width','1');line.setAttribute('stroke-opacity','.5');
+  line.setAttribute('stroke-linecap','round');line.setAttribute('stroke-linejoin','round');
+  g.appendChild(glow);g.appendChild(line);svg.appendChild(g);
+  document.body.appendChild(svg);
+
+  let pts=[],drawing=false,raf=null;
+  function resize(){svg.setAttribute('viewBox','0 0 '+window.innerWidth+' '+window.innerHeight);svg.setAttribute('width',window.innerWidth);svg.setAttribute('height',window.innerHeight);}
+  resize();window.addEventListener('resize',resize);
+
+  /* 用 Catmull-Rom 转贝塞尔，让轨迹顺滑不过硬 */
+  function smooth(p){
+    if(p.length<2)return '';
+    let d='M'+p[0].x.toFixed(1)+' '+p[0].y.toFixed(1);
+    for(let i=0;i<p.length-1;i++){
+      const p0=p[i-1]||p[i],p1=p[i],p2=p[i+1],p3=p[i+2]||p2;
+      const c1x=p1.x+(p2.x-p0.x)/6, c1y=p1.y+(p2.y-p0.y)/6;
+      const c2x=p2.x-(p3.x-p1.x)/6, c2y=p2.y-(p3.y-p1.y)/6;
+      d+='C'+c1x.toFixed(1)+' '+c1y.toFixed(1)+','+c2x.toFixed(1)+' '+c2y.toFixed(1)+','+p2.x.toFixed(1)+' '+p2.y.toFixed(1);
+    }
+    return d;
+  }
+
+  function tick(){
+    /* 尾部逐渐收缩消失（拖尾） */
+    pts.forEach(o=>{o.life-=.014;});
+    pts=pts.filter(o=>o.life>0);
+    if(pts.length){
+      /* 头部渐显、尾部渐隐：分段绘制 */
+      const visible=pts.map(o=>({x:o.x,y:o.y,life:o.life}));
+      const dFull=smooth(visible);
+      line.setAttribute('d',dFull);glow.setAttribute('d',dFull);
+      /* 绘制进度：从尾到头，营造“连贯前后消失” */
+      const total=visible.length;
+      line.setAttribute('stroke-opacity',(Math.min(.5,.5*total/12)).toFixed(2));
+      glow.setAttribute('stroke-opacity',(Math.min(.07,.07*total/12)).toFixed(2));
+      /* 线宽随拖尾变细 */
+      const tail=visible[0].life,head=visible[total-1].life;
+      line.setAttribute('stroke-width',(0.5+0.8*Math.max(0,Math.min(1,head))).toFixed(2));
+      raf=requestAnimationFrame(tick);
+    }else{
+      line.setAttribute('d','');glow.setAttribute('d','');raf=null;
+    }
+  }
+
+  function push(x,y){
+    /* 距离过滤，避免点太密 */
+    const last=pts[pts.length-1];
+    if(last&&Math.hypot(x-last.x,y-last.y)<2.2){last.life=1;return;}
+    pts.push({x,y,life:1});
+    if(pts.length>90)pts.shift();
+    if(!raf)raf=requestAnimationFrame(tick);
+  }
+
+  window.addEventListener('pointerdown',e=>{
+    if(e.target.closest('#rail'))return;
+    drawing=true;pts=[];push(e.clientX,e.clientY);
+    /* 起点：极小的方点 */
+    const d=document.createElement('div');d.className='ui-dot';
+    d.style.cssText='left:'+(e.clientX-2)+'px;top:'+(e.clientY-2)+'px';
+    document.body.appendChild(d);setTimeout(()=>d.remove(),950);
+  },{passive:true});
+  window.addEventListener('pointermove',e=>{
+    if(!drawing)return;
+    push(e.clientX,e.clientY);
+  },{passive:true});
+  window.addEventListener('pointerup',e=>{
+    if(!drawing){drawing=false;return;}
+    drawing=false;
+    /* 轻点（几乎没有位移）→ 原地生成细环波纹，保证点击有反馈 */
+    const moved=pts.length>3;
+    if(!moved){
+      /* 双层大波纹：范围更大 */
+      for(let k=0;k<2;k++){
+        const r=document.createElement('div');r.className='ui-ripple';
+        const sz=64+k*56;
+        r.style.cssText='left:'+(e.clientX-sz/2)+'px;top:'+(e.clientY-sz/2)+'px;width:'+sz+'px;height:'+sz+'px;';
+        r.style.animationDelay=(k*140)+'ms';
+        r.style.borderWidth=k?'.5px':'1px';
+        document.body.appendChild(r);setTimeout(()=>r.remove(),2300+k*180);
+      }
+      /* UI 风粒子：小方点向四周飞散消散 */
+      for(let k=0;k<7;k++){
+        const a=(Math.PI*2*k/7)+Math.random()*.5,dist=26+Math.random()*34;
+        const pt=document.createElement('div');pt.className='ui-dot';
+        pt.style.cssText='left:'+(e.clientX-1.5)+'px;top:'+(e.clientY-1.5)+'px;width:3px;height:3px';
+        document.body.appendChild(pt);
+        pt.animate([
+          {transform:'translate(0,0) scale(1)',opacity:.9},
+          {transform:'translate('+Math.cos(a)*dist+'px,'+Math.sin(a)*dist+'px) scale(.4)',opacity:0}
+        ],{duration:980+Math.random()*320,easing:'cubic-bezier(.16,.74,.3,1)'});
+        setTimeout(()=>pt.remove(),1150);
+      }
+    }
+  },{passive:true});
+  window.addEventListener('pointercancel',()=>{drawing=false;},{passive:true});
+})();
+
+/* ===== 第五页：动态倒计时 ===== */
+const t0=new Date('2025-09-30T13:41:00');
+function mk(el,val,digits){
+  if(el.childElementCount===0){
+    for(let i=0;i<digits;i++){el.appendChild(document.createElement('b'));}
+  }
+  const s=String(val).padStart(digits,'0').slice(-digits);
+  [...el.children].forEach((b,i)=>{
+    if(b.textContent!==s[i]){b.textContent=s[i];b.classList.remove('flip');void b.offsetWidth;b.classList.add('flip');}
+  });
+}
+function tick(){
+  const eD=document.getElementById('dD');if(!eD)return;
+  let s=Math.max(0,Math.floor((Date.now()-t0)/1000));
+  const D=Math.floor(s/86400);s-=D*86400;
+  const Hr=Math.floor(s/3600);s-=Hr*3600;
+  const M=Math.floor(s/60);s-=M*60;
+  mk(eD,D,3);mk(document.getElementById('dH'),Hr,2);
+  mk(document.getElementById('dM'),M,2);mk(document.getElementById('dS'),s,2);
+}
+tick();setInterval(tick,1000);
+
+/* ===== 打字机：每次进入页面重播 ===== */
+const typeEls=[...document.querySelectorAll('.type,.type2')];
+function replayType(){
+  typeEls.forEach(el=>{
+    const pg=el.closest('.pg');
+    if(!pg||!pg.classList.contains('on'))return;
+    el.style.animation='none';void el.offsetWidth;
+    el.style.animation='';
+  });
+}
+
+
+/* ===== 背景音乐：时空储蓄罐 · 同源本地音频，随机不重复 ===== */
+const DA={
+'dilemma':'https://cdn.jsdmirror.com/gh/qingfengqaq/why-rosl-deploy@main/1.mp3',
+'luminous':'https://cdn.jsdmirror.com/gh/qingfengqaq/why-rosl-deploy@main/2.mp3',
+'glacier':'https://cdn.jsdmirror.com/gh/qingfengqaq/why-rosl-deploy@main/3.mp3',
+'decorate':'https://cdn.jsdmirror.com/gh/qingfengqaq/why-rosl-deploy@main/4.mp3',
+'ginkgo':'https://cdn.jsdmirror.com/gh/qingfengqaq/why-rosl-deploy@main/5.mp3',
+'cabin':'https://cdn.jsdmirror.com/gh/qingfengqaq/why-rosl-deploy@main/6.mp3'
+};
+const TRACKS=[
+  {src:DA['dilemma'], name:'MUSIC · ONE'},
+  {src:DA['luminous'],name:'MUSIC · TWO'},
+  {src:DA['glacier'], name:'MUSIC · THREE'},
+  {src:DA['decorate'],name:'MUSIC · FOUR'},
+  {src:DA['ginkgo'],  name:'MUSIC · FIVE'},
+  {src:DA['cabin'],   name:'MUSIC · SIX'}
+];
+let audio=null,musicStarted=false,lastIdx=-1;
+
+/* 右下角：音符图标 + 声波条 + 曲名（可点静音） */
+const bgm=document.createElement('button');
+bgm.id='bgm';
+bgm.setAttribute('aria-label','音乐');
+bgm.innerHTML='<span class="music-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span><span class="eq"><i></i><i></i><i></i></span><span class="nm" id="bgmName"></span>';
+bgm.style.cssText='position:fixed;right:calc(env(safe-area-inset-right,0px) + 16px);bottom:calc(env(safe-area-inset-bottom,0px) + 78px);z-index:70;display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--ln);padding:5px 9px 5px 5px;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .9s var(--e);box-shadow:0 4px 16px rgba(0,0,0,.05)';
+document.body.appendChild(bgm);
+
+const style=document.createElement('style');
+style.textContent=`
+#bgm .music-ic{width:22px;height:22px;display:grid;place-items:center;flex:0 0 22px;color:var(--g2);opacity:.9}
+#bgm .music-ic svg{width:18px;height:18px;display:block}
+#bgm .eq{display:flex;align-items:flex-end;gap:2px;height:11px}
+#bgm .eq i{width:1.5px;background:var(--g2);height:3px;animation:eqv 1.1s ease-in-out infinite}
+#bgm .eq i:nth-child(2){animation-delay:.25s}#bgm .eq i:nth-child(3){animation-delay:.5s}
+@keyframes eqv{0%,100%{height:2px}50%{height:11px}}
+#bgm .nm{font-family:var(--mono);font-size:7.5px;letter-spacing:.16em;color:var(--g3);max-width:96px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#bgm.muted .eq i{animation:none;height:2px}
+#bgm.muted .music-ic{opacity:.4}`;
+document.head.appendChild(style);
+
+function pickIndex(){
+  let i;
+  do{i=Math.floor(Math.random()*TRACKS.length);}while(TRACKS.length>1&&i===lastIdx);
+  lastIdx=i;return i;
+}
+function playTrack(){
+  const t=TRACKS[pickIndex()];
+  if(!audio){
+    audio=new Audio();
+    audio.loop=false;
+    audio.preload='auto';
+    audio.setAttribute('playsinline','');
+    audio.setAttribute('webkit-playsinline','');
+    audio.style.display='none';
+    document.body.appendChild(audio);
+    audio.addEventListener('ended',()=>{playTrack();});
+    audio.addEventListener('error',()=>{setTimeout(()=>{playTrack();},800);});
+  }
+  audio.src=t.src;
+  audio.currentTime=0;
+  const p=audio.play();
+  if(p)p.catch(()=>{setTimeout(()=>audio.play().catch(()=>{}),450);});
+  document.getElementById('bgmName').textContent=t.name;
+}
+/* 进入第一页 → 开始播放；每次回到第一页换下一首（不重复） */
+function ensureMusic(){
+  if(!musicStarted){musicStarted=true;playTrack();bgm.style.opacity='1';bgm.style.pointerEvents='auto';}
+}
+bgm.onclick=()=>{
+  if(!audio)return;
+  if(audio.paused){audio.play().catch(()=>{});bgm.classList.remove('muted');}
+  else{audio.pause();bgm.classList.add('muted');}
+};
+
+
+/* ===== 05 页：计数递增 / 实时时间 ===== */
+(function(){
+  /* 计数器 */
+  document.querySelectorAll('.gfoot .v[data-count]').forEach(el=>{
+    const to=+el.dataset.count;
+    let started=false;
+    const run=()=>{
+      if(started)return;started=true;
+      const t0=performance.now(),dur=1300;
+      const step=t=>{const k=Math.min(1,(t-t0)/dur);el.textContent=Math.round(to*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(step);};
+      requestAnimationFrame(step);
+    };
+    const pg=el.closest('.pg');
+    if(pg)new MutationObserver(()=>{if(pg.classList.contains('on'))run();}).observe(pg,{attributes:true,attributeFilter:['class']});
+    if(pg&&pg.classList.contains('on'))run();
+  });
+  /* 计算式右侧实时时间 */
+  const n=document.getElementById('calcNow');
+  if(n){
+    const pad=v=>String(v).padStart(2,'0');
+    setInterval(()=>{const d=new Date();n.textContent=d.getFullYear()+'.'+pad(d.getMonth()+1)+'.'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());},1000);
+  }
+})();
+
+mark(0);
+/* ===== 全局墨尘生成（移动端减量） ===== */
+(function(){
+  const box=document.getElementById('dust');
+  if(!box)return;
+  const n=(innerWidth<520)?9:16;
+  for(let i=0;i<n;i++){
+    const d=document.createElement('i');
+    const sz=(Math.random()*2.2+1).toFixed(1);
+    d.style.cssText='left:'+(Math.random()*100).toFixed(1)+'vw;top:'+(Math.random()*100).toFixed(1)+'vh;'+
+      'width:'+sz+'px;height:'+sz+'px;'+
+      '--o:'+(Math.random()*.12+.06).toFixed(2)+';'+
+      'animation-duration:'+(14+Math.random()*16).toFixed(1)+'s;'+
+      'animation-delay:-'+(Math.random()*20).toFixed(1)+'s';
+    box.appendChild(d);
+  }
+})();
+
+/* ===== 全页底部声波：所有页面显示 ===== */
+(function(){
+  const el=document.getElementById('wavebar');
+  const path=document.getElementById('wavePath');
+  if(!el||!path)return;
+  const N=90,W=900,H=30;
+  let phase=0,shown=false,raf=null;
+  function draw(){
+    let d='';
+    for(let i=0;i<=N;i++){
+      const x=i/N*W;
+      const env=Math.sin(Math.PI*i/N);
+      const a=3.2+Math.sin(i*.42+phase)*1.6+Math.sin(i*.17-phase*.6)*1.1;
+      const y=H/2+Math.sin(i*.3+phase*1.6)*a*env;
+      d+=(i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' ';
+    }
+    path.setAttribute('d',d);
+  }
+  function loop(){
+    if(!shown){raf=null;return;}
+    phase+=0.035;
+    draw();
+    raf=requestAnimationFrame(loop);
+  }
+  /* 进站即淡入 */
+  window.updateWave=function(pageIndex){
+    if(shown)return;
+    shown=true;
+    el.classList.add('on');
+    if(!raf){draw();raf=requestAnimationFrame(loop);}
+  };
+  updateWave(0);
+  /* 静音联动 */
+  const bEl=document.getElementById('bgm');
+  if(bEl){
+    new MutationObserver(()=>el.classList.toggle('muted',bEl.classList.contains('muted')))
+      .observe(bEl,{attributes:true,attributeFilter:['class']});
+  }
+})();
+
+</script>
+</body>
+</html>
